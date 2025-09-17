@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CABgrab - Login</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="landing-page">
+  <div class="landing-container">
+    <h1>Welcome to <span class="brand">CABgrab</span></h1>
+    <p class="tagline">Track Brown University course availability in real-time.</p>
+
+    <a href="{{ url_for('login') }}" class="login-btn">
+      <img src="{{ url_for('static', filename='logos/icons8-google-48.png') }}" alt="Google" class="google-icon">
+      Sign in with Google
+    </a>
+  </div>
+</body>
+</html>

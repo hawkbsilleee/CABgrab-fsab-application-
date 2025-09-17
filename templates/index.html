@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CABgrab - Course Availability Tracker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>CABgrab</h1>
+            <p class="subtitle">Track course availability and get notified when spots open up</p>
+
+            {% if current_user.is_authenticated %}
+                <p>👋 Logged in as <strong>{{ current_user.email }}</strong></p>
+                <a href="{{ url_for('logout') }}" class="btn-secondary">Logout</a>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="btn-primary">Login with Brown Google</a>
+            {% endif %}
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-container">
+                {% for category, message in messages %}
+                    <div class="flash {{ category }}">{{ message }}</div>
+                {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% if current_user.is_authenticated %}
+        <main>
+            <section class="form-section">
+                <h2>Add Course to Track</h2>
+                <form id="course-form" method="POST" action="/dashboard">
+                    <div class="form-group">
+                        <label for="crn">Course CRN</label>
+                        <input type="text" id="crn" name="crn" placeholder="12345" required pattern="[0-9, ]+">
+                    </div>
+                    
+                    <button type="submit" class="btn-primary">Start Tracking</button>
+                </form>
+            </section>
+
+            <section class="table-section">
+                <h2>Your Tracked Courses</h2>
+                {% if subscriptions %}
+                <div class="table-container">
+                    <table class="subscriptions-table">
+                        <thead>
+                            <tr>
+                                <th>CRN</th>
+                                <th>Date Added</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sub in subscriptions %}
+                            <tr>
+                                <td>{{ sub[1] }}</td>
+                                <td>{{ sub[2] if sub[2] else 'N/A' }}</td>
+                                <td>
+                                    <form method="POST" action="/delete/{{ sub[0] }}" class="delete-form" onsubmit="return confirm('Stop tracking this course?')">
+                                        <button type="submit" class="btn-delete">Remove</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <p>No courses being tracked yet. Add one above to get started!</p>
+                </div>
+                {% endif %}
+            </section>
+        </main>
+        {% endif %}
+
+        <footer>
+            <p>by Ethan and Dhruv</p>
+        </footer>
+    </div>
+
+    <script>
+        // Validation for CRN input
+        document.getElementById('course-form')?.addEventListener('submit', function(e) {
+            const crn = document.getElementById('crn').value;
+            if (!/^[0-9, ]+$/.test(crn)) {
+                e.preventDefault();
+                alert('CRN must be numbers (you can separate multiple CRNs with commas)');
+            }
+        });
+    </script>
+</body>
+</html>
