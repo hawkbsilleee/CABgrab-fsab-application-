@@ -1,5 +1,4 @@
 from flask import Flask, request, render_template, redirect, url_for, session, flash
-import sqlite3
 import threading
 import time
 from api_interface import get_course_info
@@ -10,29 +9,19 @@ from flask_login import (
     login_required, UserMixin, current_user
 )
 import os
+import firebase_admin
+from firebase_admin import credentials, firestore
 
+# Flask Setup
 app = Flask(__name__, template_folder="templates")
 app.secret_key = os.getenv("SECRET_KEY")
-DB = "subscriptions.db"
 
-# --- DB Setup ---
-def init_db():
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS subscriptions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT NOT NULL,
-        crn TEXT NOT NULL,
-        notified INTEGER DEFAULT 0
-    )
-    """)
-    conn.commit()
-    conn.close()
+# Firebase Setup
+cred = credentials.Certificate("cabgrab-12478-firebase-adminsdk-fbsvc-d92b5a1a0c.json")
+firebase_admin.initialize_app(cred)
+db = firestore.client()
 
-init_db()
-
-# --- Flask-Login Setup ---
+# Flask-Login Setup
 login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
@@ -44,10 +33,9 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-    # User is stored in session, just reload
     return User(user_id, session.get("email"))
 
-# --- OAuth Setup ---
+# OAuth Setup
 oauth = OAuth(app)
 oauth.register(
     name="google",
@@ -57,7 +45,7 @@ oauth.register(
     client_kwargs={"scope": "openid email profile"},
 )
 
-# --- Auth Routes ---
+# Auth Routes 
 @app.route("/login")
 def login():
     redirect_uri = url_for("authorize", _external=True)
@@ -68,10 +56,6 @@ def authorize():
     token = oauth.google.authorize_access_token()
     user_info = token["userinfo"]
     email = user_info["email"]
-
-    # enforce @brown.edu restriction
-    # if not email.endswith("@brown.edu"):
-    #     return "❌ Must use a @brown.edu email", 403
 
     user = User(id_=email, email=email)
     login_user(user)
@@ -86,7 +70,7 @@ def logout():
     session.clear()
     return redirect(url_for("landing"))
 
-# --- Routes ---
+# Routes 
 @app.route("/")
 @app.route("/landing")
 def landing():
@@ -99,89 +83,78 @@ def landing():
 def dashboard():
     if request.method == "POST":
         crns = request.form["crn"].split(",")
-        
-        conn = sqlite3.connect(DB)
-        c = conn.cursor()
-        added = []
-        failed = []
+        added, failed = [], []
 
         for crn in crns:
             crn = crn.strip()
             if not crn:
                 continue
             try:
-                # Try fetching course info to validate CRN
                 info = get_course_info(crn)
+                if not info:
+                    print(f"CRN {crn} returned no course info.")
+                    continue
                 if info and "seats_available" in info:
-                    c.execute("INSERT INTO subscriptions (email, crn) VALUES (?, ?)", (current_user.email, crn))
+                    db.collection("subscriptions").add({
+                        "email": current_user.email,
+                        "crn": crn,
+                        "notified": 0
+                    })
                     added.append(crn)
                 else:
                     failed.append(crn)
-            except Exception as e:
+            except Exception:
                 failed.append(crn)
 
-        conn.commit()
-        conn.close()
-
-        # Optional: flash messages (requires enabling Flask's flash/secret key)
         if added:
-            # print(f"✅ Added valid CRNs: {', '.join(added)}")
             flash(f"Added valid CRNs: {', '.join(added)}", "success")
         if failed:
-            # print(f"❌ Invalid CRNs skipped: {', '.join(failed)}")
             flash(f"Invalid CRNs skipped: {', '.join(failed)}", "error")
 
         return redirect(url_for("dashboard"))
 
     # GET request
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("SELECT id, crn, datetime('now') FROM subscriptions WHERE email = ?", (current_user.email,))
-    subscriptions = c.fetchall()
-    conn.close()
+    subs_ref = db.collection("subscriptions").where("email", "==", current_user.email)
+    subscriptions = [(doc.id, doc.to_dict()["crn"]) for doc in subs_ref.stream()]
 
     return render_template("index.html", subscriptions=subscriptions)
 
-@app.route("/delete/<int:sub_id>", methods=["POST"])
+@app.route("/delete/<sub_id>", methods=["POST"])
 @login_required
 def delete_subscription(sub_id):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("DELETE FROM subscriptions WHERE id = ? AND email = ?", (sub_id, current_user.email))
-    conn.commit()
-    conn.close()
+    doc_ref = db.collection("subscriptions").document(sub_id)
+    doc = doc_ref.get()
+    if doc.exists and doc.to_dict().get("email") == current_user.email:
+        doc_ref.delete()
     return redirect(url_for("dashboard"))
 
-# --- Background Poller ---
+# Polling Loop 
 def poll_loop():
     while True:
-        conn = sqlite3.connect(DB)
-        c = conn.cursor()
-        c.execute("SELECT id, email, crn, notified FROM subscriptions")
-        subs = c.fetchall()
+        subs = db.collection("subscriptions").stream()
+        for doc in subs:
+            data = doc.to_dict()
+            sub_id = doc.id
+            email = data["email"]
+            crn = data["crn"]
+            notified = data.get("notified", 0)
 
-        for sub_id, email, crn, notified in subs:
             try:
                 info = get_course_info(crn)
                 time.sleep(2)
                 seats = info["seats_available"]
 
-                # If seats are open and we haven’t emailed this user yet
                 if seats > 0 and notified == 0:
                     send_email(crn, email)
-                    c.execute("UPDATE subscriptions SET notified = 1 WHERE id = ?", (sub_id,))
-                    conn.commit()   # 🔥 commit right away
-                    print(f"📧 Sent alert to {email} for CRN {crn} ({seats} seats open)")
+                    db.collection("subscriptions").document(sub_id).update({"notified": 1})
+                    print(f"Sent alert to {email} for CRN {crn} ({seats} seats open)")
 
-                # Reset notification if seats drop back down
                 elif seats <= 0 and notified == 1:
-                    c.execute("UPDATE subscriptions SET notified = 0 WHERE id = ?", (sub_id,))
-                    conn.commit()   # 🔥 commit right away
+                    db.collection("subscriptions").document(sub_id).update({"notified": 0})
 
             except Exception as e:
-                print(f"❌ Error checking {crn}: {e}")
+                print(f"Error checking {crn}: {e}")
 
-        conn.close()
         time.sleep(300)
 
 threading.Thread(target=poll_loop, daemon=True).start()

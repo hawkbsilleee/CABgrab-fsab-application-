@@ -4,17 +4,13 @@ import re
 from bs4 import BeautifulSoup
 
 def get_course_info(crn):
-
     url = "https://cab.brown.edu/api/?page=fose&route=details"
-
     payload = {
-        # "group": "code:ECON 0170",
         "key": f"crn:{crn}",
         "srcdb": "202510",  # Fall 2025
         "matched": f"crn:{crn}",
         "userWithRolesStr": "!!!!!!"
     }
-
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -26,20 +22,27 @@ def get_course_info(crn):
 
     resp = requests.post(url, headers=headers, data=json.dumps(payload))
     data = resp.json()
-    # print(resp.json())
 
     # Parse the "seats" HTML
-    soup = BeautifulSoup(data["seats"], "html.parser")
-    max_enrollment = int(soup.find("span", class_="seats_max").text)
-    seats_available = int(soup.find("span", class_="seats_avail").text)
+    soup = BeautifulSoup(data.get("seats", ""), "html.parser")
+
+    max_elem = soup.find("span", class_="seats_max")
+    avail_elem = soup.find("span", class_="seats_avail")
+
+    if not max_elem or not avail_elem:
+        # Invalid CRN or no seat info returned
+        return None
+
+    try:
+        max_enrollment = int(max_elem.text.strip())
+        seats_available = int(avail_elem.text.strip())
+    except ValueError:
+        return None
 
     # Parse the "regdemog_html" HTML
-    enrolled_match = re.search(r"Current enrollment:\s*(\d+)", data["regdemog_html"])
+    enrolled_match = re.search(r"Current enrollment:\s*(\d+)", data.get("regdemog_html", ""))
     current_enrolled = int(enrolled_match.group(1)) if enrolled_match else None
 
-    # print("Max Enrollment:", max_enrollment)
-    # print("Enrolled:", current_enrolled)
-    # print("Seats Available:", seats_available)
     return {
         "max_enrollment": max_enrollment,
         "current_enrolled": current_enrolled,
