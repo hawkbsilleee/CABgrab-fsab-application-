@@ -45,7 +45,7 @@
 
 A working version of CABgrab is hosted: https://cab-grab.onrender.com/landing. 
 
-Originally Dhruv and I implemented CABgrab as a Flask app with a CSS/HTML frontend and sqlite database. 
+Originally Dhruv and I implemented CABgrab as a Flask app with a CSS/HTML frontend and sqlite database. Repo for this code is: https://github.com/hawkbsilleee/CAB-Grab. 
 
 This repo contains a modified version of the app I made that uses a Flask backend and a React frontend and Firebase database. 
 
